@@ -32,12 +32,17 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.sagwatteok.drumpractice.core.midi.Drum
 import io.github.sagwatteok.drumpractice.core.midi.MidiKind
+
+private val primaryPads = listOf(Drum.KICK, Drum.SNARE, Drum.CLOSED_HI_HAT)
+private val otherPads = Drum.entries - primaryPads.toSet()
 
 @Composable
 fun PracticeScreen(model: PracticeViewModel) {
@@ -132,29 +137,28 @@ fun PracticeScreen(model: PracticeViewModel) {
 
                     1 -> {
                         item {
-                            Panel("최근 타격") {
-                                HitDisplay("USB", state.usbHits)
-                                HorizontalDivider()
-                                HitDisplay("Mock", state.mockHits)
-                                OutlinedButton(model::clearSession) { Text("세션 초기화") }
+                            Panel("드럼 세트") {
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    primaryPads.forEach { drum ->
+                                        DrumPad(drum, state, model::mockHit, Modifier.weight(1f))
+                                    }
+                                }
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    otherPads.forEach { drum -> DrumPad(drum, state, model::mockHit) }
+                                }
+                                Text("패드를 누르면 Mock 타격을 보냅니다.")
                             }
                         }
                         item {
-                            Panel("드럼 세트") {
-                                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Drum.entries.forEach { drum ->
-                                        val usbCount = state.usbHits.counts.getOrDefault(drum, 0)
-                                        val mockCount = state.mockHits.counts.getOrDefault(drum, 0)
-                                        val note = state.mapping[drum]
-                                        FilterChip(
-                                            selected = drum in state.activePads,
-                                            onClick = { model.mockHit(drum) },
-                                            enabled = state.mockConnected && state.mappingReady && note != null,
-                                            label = { Text("${drum.label} · USB $usbCount / Mock $mockCount${if (note == null) " · 미지정" else ""}") },
-                                        )
-                                    }
-                                }
-                                Text("드럼 이름을 누르면 Mock 타격을 보냅니다.")
+                            Panel("타격 요약") {
+                                HitDisplay("USB", state.usbHits)
+                                HorizontalDivider()
+                                HitDisplay("Mock", state.mockHits)
+                                DrumHitCounts(state.usbHits, state.mockHits)
+                                OutlinedButton(model::clearSession) { Text("세션 초기화") }
                             }
                         }
                         item {
@@ -237,6 +241,35 @@ fun PracticeScreen(model: PracticeViewModel) {
 }
 
 private fun support(available: Boolean) = if (available) "지원" else "미지원"
+
+@Composable
+private fun DrumPad(drum: Drum, state: PracticeState, onHit: (Drum) -> Unit, modifier: Modifier = Modifier) {
+    val mapped = drum in state.mapping
+    val padModifier = if (state.mappingReady && !mapped) {
+        modifier.semantics { stateDescription = "미지정" }
+    } else modifier
+    FilterChip(
+        selected = drum in state.activePads,
+        onClick = { onHit(drum) },
+        enabled = state.mockConnected && state.mappingReady && mapped,
+        modifier = padModifier,
+        label = { Text(if (drum == Drum.CLOSED_HI_HAT) "닫힌 하이햇" else drum.label) },
+    )
+}
+
+@Composable
+private fun DrumHitCounts(usb: HitSummary, mock: HitSummary) {
+    if (usb.counts.isEmpty() && mock.counts.isEmpty()) return
+    HorizontalDivider()
+    Text("패드별 횟수", style = MaterialTheme.typography.titleMedium)
+    Drum.entries.forEach { drum ->
+        val usbCount = usb.counts.getOrDefault(drum, 0)
+        val mockCount = mock.counts.getOrDefault(drum, 0)
+        if (usbCount != 0L || mockCount != 0L) {
+            Text("${drum.label} · USB $usbCount / Mock $mockCount")
+        }
+    }
+}
 
 @Composable
 private fun HitDisplay(source: String, summary: HitSummary) {
