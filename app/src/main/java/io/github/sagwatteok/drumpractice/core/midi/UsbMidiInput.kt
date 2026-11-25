@@ -12,6 +12,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import java.io.Closeable
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 data class MidiPort(val id: Int, val index: Int, val name: String, val identity: String)
@@ -20,15 +21,26 @@ data class MidiConnection(
     val status: String = "검색 중",
     val active: MidiPort? = null,
     val hasSelection: Boolean = false,
+    val activeSession: Int? = null,
 )
 
-class UsbMidiInput(context: Context, private val receive: (ByteArray, List<MidiMessage>) -> Unit) : Closeable {
+internal typealias MidiPacketReceiver = (ByteArray, List<MidiMessage>, Int) -> Unit
+
+internal interface MidiInput : Closeable {
+    val supported: Boolean
+    val connection: StateFlow<MidiConnection>
+    fun rescan()
+    fun connect(port: MidiPort)
+    fun disconnect()
+}
+
+internal class UsbMidiInput(context: Context, private val receive: MidiPacketReceiver) : MidiInput {
     private val manager = context.getSystemService(MidiManager::class.java)
-    val supported = context.packageManager.hasSystemFeature(PackageManager.FEATURE_MIDI) && manager != null
+    override val supported = context.packageManager.hasSystemFeature(PackageManager.FEATURE_MIDI) && manager != null
     private val thread = HandlerThread("usb-midi").apply { start() }
     private val handler = Handler(thread.looper)
     private val state = MutableStateFlow(MidiConnection())
-    val connection = state.asStateFlow()
+    override val connection = state.asStateFlow()
     private var preferredIdentity: String? = null
     private var opening: MidiPort? = null
     private var active: MidiPort? = null
@@ -93,16 +105,16 @@ class UsbMidiInput(context: Context, private val receive: (ByteArray, List<MidiM
             preferredIdentity != null -> "연결 끊김 · 재연결 대기"
             ports.isEmpty() -> "USB MIDI 장치 없음"
             else -> "연결할 MIDI 포트를 선택하세요"
-        }, active, preferredIdentity != null)
+        }, active, preferredIdentity != null, active?.let { generation })
         if (active == null && opening == null && candidates.size == 1) {
             val port = candidates.single()
             open(port, devices.first { it.id == port.id })
         }
     }
 
-    fun rescan() { handler.post { refresh() } }
+    override fun rescan() { handler.post { refresh() } }
 
-    fun connect(port: MidiPort) {
+    override fun connect(port: MidiPort) {
         handler.post {
             if (closed) return@post
             release()
@@ -114,7 +126,7 @@ class UsbMidiInput(context: Context, private val receive: (ByteArray, List<MidiM
 
     private fun open(port: MidiPort, info: MidiDeviceInfo) {
         opening = port
-        state.value = state.value.copy(status = "연결 중", active = null, hasSelection = true)
+        state.value = state.value.copy(status = "연결 중", active = null, hasSelection = true, activeSession = null)
         val token = ++generation
         runCatching {
             manager!!.openDevice(info, { opened ->
@@ -135,7 +147,7 @@ class UsbMidiInput(context: Context, private val receive: (ByteArray, List<MidiM
                                     if (!closed && generation == token) {
                                         val messages = mutableListOf<MidiMessage>()
                                         parser.accept(bytes, timestamp, received, messages::add)
-                                        receive(bytes, messages)
+                                        receive(bytes, messages, token)
                                     }
                                 }
                             }
@@ -168,7 +180,7 @@ class UsbMidiInput(context: Context, private val receive: (ByteArray, List<MidiM
         device = null
     }
 
-    fun disconnect() {
+    override fun disconnect() {
         handler.post {
             preferredIdentity = null
             release()

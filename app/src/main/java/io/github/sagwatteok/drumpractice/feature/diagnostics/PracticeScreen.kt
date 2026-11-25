@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.AlertDialog
@@ -26,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -43,6 +45,7 @@ fun PracticeScreen(model: PracticeViewModel) {
     val midi by model.connection.collectAsStateWithLifecycle()
     val audio by model.audio.snapshot.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf(0) }
+    val listState = key(tab) { rememberLazyListState() }
     var preferredOutput by rememberSaveable { mutableStateOf<Int?>(null) }
     var editing by rememberSaveable { mutableStateOf<Drum?>(null) }
     var bpmText by rememberSaveable { mutableStateOf("120") }
@@ -59,6 +62,7 @@ fun PracticeScreen(model: PracticeViewModel) {
             }
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
+                state = listState,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 20.dp),
             ) {
@@ -184,11 +188,17 @@ fun PracticeScreen(model: PracticeViewModel) {
                     2 -> {
                         item {
                             Panel("MIDI Learn") {
-                                Text("기본값은 General MIDI 예시입니다. Learn을 누른 뒤 모듈 패드를 한 번 치세요.")
+                                Text("기본값은 General MIDI 예시입니다.")
+                                if (midi.active == null) {
+                                    Text("MIDI Learn을 사용하려면 USB MIDI 포트를 먼저 연결하세요. Note 번호는 직접 수정할 수 있습니다.")
+                                    OutlinedButton({ tab = 0; model.refresh() }) { Text("연결 진단 열기") }
+                                } else {
+                                    Text("Learn을 누른 뒤 모듈 패드를 한 번 치세요.")
+                                }
                                 Text("한 Note 번호는 한 드럼에 배정됩니다.")
-                                Text(state.noteStatus)
+                                if (state.noteStatus.isNotBlank()) Text(state.noteStatus)
                                 if (state.learning != null) {
-                                    OutlinedButton({ model.learn(null) }) { Text("Learn 취소") }
+                                    OutlinedButton({ model.cancelLearn() }) { Text("Learn 취소") }
                                 }
                             }
                         }
@@ -196,7 +206,7 @@ fun PracticeScreen(model: PracticeViewModel) {
                             Panel(drum.label) {
                                 Text(state.mapping[drum]?.let { "Note $it" } ?: "미지정")
                                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Button({ model.learn(drum) }, enabled = state.mappingReady) { Text("Learn") }
+                                    Button({ model.learn(drum) }, enabled = state.mappingReady && midi.active != null) { Text("Learn") }
                                     OutlinedButton({ editing = drum }, enabled = state.mappingReady) { Text("수정") }
                                 }
                             }

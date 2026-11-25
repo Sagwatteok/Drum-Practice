@@ -1,6 +1,7 @@
 package io.github.sagwatteok.drumpractice.feature.diagnostics
 
 import android.app.Application
+import android.content.Context
 import android.content.pm.PackageManager
 import android.hardware.usb.UsbManager
 import androidx.datastore.core.DataStore
@@ -13,8 +14,10 @@ import androidx.lifecycle.viewModelScope
 import io.github.sagwatteok.drumpractice.core.audio.AudioProbe
 import io.github.sagwatteok.drumpractice.core.midi.Drum
 import io.github.sagwatteok.drumpractice.core.midi.DrumHitEvent
+import io.github.sagwatteok.drumpractice.core.midi.MidiInput
 import io.github.sagwatteok.drumpractice.core.midi.MidiKind
 import io.github.sagwatteok.drumpractice.core.midi.MidiMessage
+import io.github.sagwatteok.drumpractice.core.midi.MidiPacketReceiver
 import io.github.sagwatteok.drumpractice.core.midi.MidiParser
 import io.github.sagwatteok.drumpractice.core.midi.MidiPort
 import io.github.sagwatteok.drumpractice.core.midi.UsbMidiInput
@@ -46,12 +49,15 @@ data class MidiLog(
     val mock: Boolean,
     val usbAudioRouted: Boolean,
     val handledAtNanos: Long,
+    val inputSession: Int? = null,
 )
+
+data class MidiLearnRequest(val drum: Drum, val inputSession: Int, val startedAtNanos: Long)
 
 data class PracticeState(
     val mapping: Map<Drum, Int> = Drum.entries.mapNotNull { drum -> drum.defaultNote?.let { drum to it } }.toMap(),
     val mappingReady: Boolean = false,
-    val learning: Drum? = null,
+    val learning: MidiLearnRequest? = null,
     val noteStatus: String = "",
     val logs: List<MidiLog> = emptyList(),
     val usbHits: HitSummary = HitSummary(),
@@ -83,6 +89,7 @@ data class PracticeState(
 class PracticeViewModel internal constructor(
     private val app: Application,
     private val mappingStore: DataStore<Preferences>,
+    createInput: (Context, MidiPacketReceiver) -> MidiInput = ::UsbMidiInput,
 ) : AndroidViewModel(app) {
     constructor(app: Application) : this(app, app.mappingStore)
     private val state = MutableStateFlow(PracticeState())
@@ -92,8 +99,9 @@ class PracticeViewModel internal constructor(
     private val mockParser = MidiParser()
     private var mockJob: Job? = null
     private var highlightJob: Job? = null
-    private val input = UsbMidiInput(app) { bytes, messages ->
-        packets.trySend(packet(bytes, messages, mock = false, usbAudioRouted = audio.snapshot.value.usbRouted))
+    private val input = createInput(app) { bytes, messages, session ->
+        packets.trySend(packet(bytes, messages, mock = false, usbAudioRouted = audio.snapshot.value.usbRouted)
+            .copy(inputSession = session))
     }
     val connection = input.connection
     val midiSupported = input.supported
@@ -112,7 +120,14 @@ class PracticeViewModel internal constructor(
             }
         }
         viewModelScope.launch { for (row in packets) process(row) }
-        viewModelScope.launch { connection.collect { refreshUsbDevices() } }
+        viewModelScope.launch {
+            connection.collect { midi ->
+                refreshUsbDevices()
+                if (state.value.learning?.let { it.inputSession != midi.activeSession } == true) {
+                    cancelLearn("MIDI 연결이 바뀌어 Learn 대기가 취소되었습니다")
+                }
+            }
+        }
         viewModelScope.launch { audio.snapshot.collect { refreshUsbDevices() } }
         refresh()
     }
@@ -132,11 +147,27 @@ class PracticeViewModel internal constructor(
         }
     }
 
-    fun connect(port: MidiPort) = input.connect(port)
-    fun disconnect() = input.disconnect()
-    fun learn(drum: Drum?) {
-        if (state.value.mappingReady) state.update {
-            it.copy(learning = drum, noteStatus = if (drum == null) "" else "${drum.label} 타격 대기 중")
+    fun connect(port: MidiPort) {
+        cancelLearn("MIDI 연결이 바뀌어 Learn 대기가 취소되었습니다")
+        input.connect(port)
+    }
+
+    fun disconnect() {
+        cancelLearn("MIDI 연결이 해제되어 Learn 대기가 취소되었습니다")
+        input.disconnect()
+    }
+
+    fun learn(drum: Drum) {
+        val midi = connection.value
+        val session = midi.activeSession
+        if (midi.active == null || session == null || !state.value.mappingReady) return
+        val request = MidiLearnRequest(drum, session, System.nanoTime())
+        state.update { it.copy(learning = request, noteStatus = "${drum.label} 타격 대기 중") }
+    }
+
+    fun cancelLearn(status: String = "") {
+        state.update {
+            if (it.learning == null) it else it.copy(learning = null, noteStatus = status)
         }
     }
 
@@ -217,9 +248,12 @@ class PracticeViewModel internal constructor(
         for (message in row.messages) {
             if (message.kind != MidiKind.NOTE_ON) continue
             val current = state.value
-            val learned = current.learning?.takeUnless { row.mock }
+            val learned = current.learning?.takeIf {
+                it.inputSession == row.inputSession && it.inputSession == connection.value.activeSession &&
+                    message.receivedAtNanos >= it.startedAtNanos
+            }?.drum
             if (learned != null) {
-                learn(null)
+                cancelLearn()
                 saveMapping(learned, message.number)
             }
             val drum = learned ?: current.mapping.entries.firstOrNull { it.value == message.number }?.key
