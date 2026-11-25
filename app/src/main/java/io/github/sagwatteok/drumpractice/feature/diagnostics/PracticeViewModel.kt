@@ -21,6 +21,8 @@ import io.github.sagwatteok.drumpractice.core.midi.MidiPacketReceiver
 import io.github.sagwatteok.drumpractice.core.midi.MidiParser
 import io.github.sagwatteok.drumpractice.core.midi.MidiPort
 import io.github.sagwatteok.drumpractice.core.midi.UsbMidiInput
+import io.github.sagwatteok.drumpractice.core.scoring.HitSource
+import io.github.sagwatteok.drumpractice.feature.practice.PracticeTransport
 import java.io.IOException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
@@ -104,6 +106,7 @@ class PracticeViewModel internal constructor(
             .copy(inputSession = session))
     }
     val connection = input.connection
+    val rhythm = PracticeTransport(app, viewModelScope, { connection.value.activeSession }, ::mockNotes)
     val midiSupported = input.supported
     val hostSupported = app.packageManager.hasSystemFeature(PackageManager.FEATURE_USB_HOST)
 
@@ -122,6 +125,7 @@ class PracticeViewModel internal constructor(
         viewModelScope.launch { for (row in packets) process(row) }
         viewModelScope.launch {
             connection.collect { midi ->
+                rhythm.usbConnectionChanged()
                 refreshUsbDevices()
                 if (state.value.learning?.let { it.inputSession != midi.activeSession } == true) {
                     cancelLearn("MIDI 연결이 바뀌어 Learn 대기가 취소되었습니다")
@@ -190,6 +194,17 @@ class PracticeViewModel internal constructor(
     }
 
     fun mockHit(drum: Drum) = mockNotes(listOf(drum), System.nanoTime())
+
+    fun startRhythm(preferredDeviceId: Int?) {
+        audio.stop()
+        stopMock()
+        rhythm.start(preferredDeviceId)
+    }
+
+    fun playAudioProbe(preferredDeviceId: Int?) {
+        rhythm.stop()
+        audio.play(preferredDeviceId)
+    }
 
     fun startMock(bpm: Int, pattern: MockPattern) {
         if (!state.value.mockConnected || !state.value.mappingReady) return
@@ -273,6 +288,8 @@ class PracticeViewModel internal constructor(
             )
         }
         if (hits.isNotEmpty()) {
+            val source = if (row.mock) HitSource.MOCK else HitSource.USB
+            hits.forEach { rhythm.hit(source, it, row.inputSession) }
             highlightJob?.cancel()
             highlightJob = viewModelScope.launch {
                 delay(PAD_HIGHLIGHT_MILLIS)

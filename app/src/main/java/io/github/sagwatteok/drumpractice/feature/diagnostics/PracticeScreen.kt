@@ -40,6 +40,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.sagwatteok.drumpractice.core.midi.Drum
 import io.github.sagwatteok.drumpractice.core.midi.MidiKind
+import io.github.sagwatteok.drumpractice.feature.practice.MetronomeControls
+import io.github.sagwatteok.drumpractice.feature.practice.PracticeMockPads
+import io.github.sagwatteok.drumpractice.feature.practice.PracticeScores
 
 private val primaryPads = listOf(Drum.KICK, Drum.SNARE, Drum.CLOSED_HI_HAT)
 private val otherPads = Drum.entries - primaryPads.toSet()
@@ -49,6 +52,7 @@ fun PracticeScreen(model: PracticeViewModel) {
     val state by model.practice.collectAsStateWithLifecycle()
     val midi by model.connection.collectAsStateWithLifecycle()
     val audio by model.audio.snapshot.collectAsStateWithLifecycle()
+    val rhythm by model.rhythm.snapshot.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf(0) }
     val listState = key(tab) { rememberLazyListState() }
     var preferredOutput by rememberSaveable { mutableStateOf<Int?>(null) }
@@ -60,8 +64,8 @@ fun PracticeScreen(model: PracticeViewModel) {
         Column(Modifier.fillMaxSize().padding(insets).padding(horizontal = 16.dp)) {
             Text("Drum Practice", Modifier.padding(top = 12.dp), style = MaterialTheme.typography.headlineMedium)
             Text(midi.active?.name?.let { "MIDI 연결 · $it" } ?: midi.status)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("연결 진단", "자유 연주", "매핑").forEachIndexed { index, title ->
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("연결 진단", "자유 연주", "매핑", "연습").forEachIndexed { index, title ->
                     FilterChip(tab == index, { tab = index }, label = { Text(title) })
                 }
             }
@@ -105,7 +109,7 @@ fun PracticeScreen(model: PracticeViewModel) {
                                 if (audio.playing) {
                                     OutlinedButton({ model.audio.stop() }) { Text("테스트음 중지") }
                                 } else {
-                                    Button({ model.audio.play(preferredOutput) }) { Text("12초 테스트음 재생") }
+                                    Button({ model.playAudioProbe(preferredOutput) }) { Text("12초 테스트음 재생") }
                                 }
                                 Text("헤드폰은 모듈 PHONES/OUTPUT에 꽂고 테스트음을 들으며 드럼을 치세요.")
                                 Text("USB 오디오를 사용할 수 없으면 MIDI는 USB에 두고 별도 아날로그 출력을 AUX IN에 연결하세요.")
@@ -214,6 +218,22 @@ fun PracticeScreen(model: PracticeViewModel) {
                                     OutlinedButton({ editing = drum }, enabled = state.mappingReady) { Text("수정") }
                                 }
                             }
+                        }
+                    }
+
+                    3 -> {
+                        item {
+                            Panel("메트로놈 · ${rhythm.plan.pattern.title}") {
+                                MetronomeControls(rhythm, model.rhythm) { model.startRhythm(preferredOutput) }
+                            }
+                        }
+                        item {
+                            Panel("Mock 패드") {
+                                PracticeMockPads(listOf(Drum.KICK), state.mockConnected && state.mappingReady, model::mockHit)
+                            }
+                        }
+                        item {
+                            Panel("채점") { PracticeScores(rhythm.scores) }
                         }
                     }
                 }

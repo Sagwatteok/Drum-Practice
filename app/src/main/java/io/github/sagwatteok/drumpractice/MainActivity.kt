@@ -35,6 +35,7 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         if (!isChangingConfigurations) {
             model.audio.stop()
+            model.rhythm.stop()
             model.stopMock()
         }
         super.onStop()
