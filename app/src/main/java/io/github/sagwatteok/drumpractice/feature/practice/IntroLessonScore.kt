@@ -25,10 +25,16 @@ import io.github.sagwatteok.drumpractice.core.timing.STEPS_PER_BAR
 import io.github.sagwatteok.drumpractice.core.timing.STEPS_PER_BEAT
 
 @Composable
-fun IntroLessonScore(state: TransportState) {
+fun IntroLessonGuide() {
     Text("4/4 · 닫힌 하이햇 8분음표 · 킥 1·3박 · 스네어 2·4박")
-    val range = if (state.plan.repeat) "반복 구간 · ${barRangeLabel(state.plan.bars)}" else "반복 꺼짐"
-    Text("$range · 시작 ${state.plan.firstBar + 1}마디", style = MaterialTheme.typography.bodyMedium)
+}
+
+@Composable
+fun IntroLessonScore(state: TransportState, showContext: Boolean) {
+    if (showContext) {
+        IntroLessonGuide()
+        Text(repeatDescription(state), style = MaterialTheme.typography.bodyMedium)
+    }
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val bars = state.plan.pattern.bars.indices
         if (maxWidth >= 600.dp) {

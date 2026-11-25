@@ -17,3 +17,8 @@ val introPads = listOf(Drum.KICK, Drum.SNARE, Drum.CLOSED_HI_HAT)
 
 fun barRangeLabel(bars: IntRange): String =
     if (bars.first == bars.last) "${bars.first + 1}마디" else "${bars.first + 1}–${bars.last + 1}마디"
+
+fun repeatDescription(state: TransportState): String {
+    val range = if (state.plan.repeat) "반복 구간 · ${barRangeLabel(state.plan.bars)}" else "반복 꺼짐"
+    return "$range · 시작 ${state.plan.firstBar + 1}마디"
+}

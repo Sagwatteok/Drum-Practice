@@ -3,6 +3,7 @@ package io.github.sagwatteok.drumpractice.feature.practice
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
@@ -16,6 +17,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -53,18 +55,39 @@ fun MetronomeSettings(state: TransportState, transport: PracticeTransport) {
 }
 
 @Composable
-fun LessonPlayback(state: TransportState, start: () -> Unit, stop: () -> Unit) {
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Button(start, enabled = !state.running) { Text("재생") }
-        OutlinedButton(stop, enabled = state.running) { Text("정지") }
-    }
+fun LessonPlayback(state: TransportState, start: () -> Unit, stop: () -> Unit, compact: Boolean) {
     val position = state.position
     val status = when {
         position == null -> state.message.ifBlank { "연습 대기 중" }
         position.bar == null -> "카운트인 · ${position.beat}/4박"
         else -> "현재 · ${position.bar + 1}마디 · ${position.beat}/4박"
     }
-    Text("${state.plan.bpm} BPM · $status", style = MaterialTheme.typography.titleMedium)
+    val positionText = "${state.plan.bpm} BPM · $status"
+    if (compact) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(state.plan.pattern.title, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+            PlaybackButtons(state, start, stop)
+        }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text(positionText, style = MaterialTheme.typography.titleMedium)
+            Text(repeatDescription(state), style = MaterialTheme.typography.titleMedium)
+        }
+    } else {
+        PlaybackButtons(state, start, stop)
+        Text(positionText, style = MaterialTheme.typography.titleMedium)
+    }
+}
+
+@Composable
+private fun PlaybackButtons(state: TransportState, start: () -> Unit, stop: () -> Unit) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Button(start, enabled = !state.running) { Text("재생") }
+        OutlinedButton(stop, enabled = state.running) { Text("정지") }
+    }
 }
 
 @Composable

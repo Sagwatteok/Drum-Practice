@@ -1,5 +1,6 @@
 package io.github.sagwatteok.drumpractice.feature.diagnostics
 
+import android.content.res.Configuration
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -32,6 +33,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
@@ -41,6 +43,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.sagwatteok.drumpractice.core.midi.Drum
 import io.github.sagwatteok.drumpractice.core.midi.MidiKind
 import io.github.sagwatteok.drumpractice.feature.practice.IntroLessonScore
+import io.github.sagwatteok.drumpractice.feature.practice.IntroLessonGuide
 import io.github.sagwatteok.drumpractice.feature.practice.LessonPlayback
 import io.github.sagwatteok.drumpractice.feature.practice.LessonRangeSettings
 import io.github.sagwatteok.drumpractice.feature.practice.MetronomeSettings
@@ -58,7 +61,8 @@ fun PracticeScreen(model: PracticeViewModel) {
     val audio by model.audio.snapshot.collectAsStateWithLifecycle()
     val rhythm by model.rhythm.snapshot.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf(0) }
-    val listState = key(tab) { rememberLazyListState() }
+    val compactLesson = tab == 3 && LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val listState = key(tab, compactLesson) { rememberLazyListState() }
     var preferredOutput by rememberSaveable { mutableStateOf<Int?>(null) }
     var editing by rememberSaveable { mutableStateOf<Drum?>(null) }
     var bpmText by rememberSaveable { mutableStateOf("120") }
@@ -66,8 +70,10 @@ fun PracticeScreen(model: PracticeViewModel) {
 
     Scaffold { insets ->
         Column(Modifier.fillMaxSize().padding(insets).padding(horizontal = 16.dp)) {
-            Text("Drum Practice", Modifier.padding(top = 12.dp), style = MaterialTheme.typography.headlineMedium)
-            Text(midi.active?.name?.let { "MIDI 연결 · $it" } ?: midi.status)
+            if (!compactLesson) {
+                Text("Drum Practice", Modifier.padding(top = 12.dp), style = MaterialTheme.typography.headlineMedium)
+                Text(midi.active?.name?.let { "MIDI 연결 · $it" } ?: midi.status)
+            }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("연결 진단", "자유 연주", "매핑", "레슨").forEachIndexed { index, title ->
                     FilterChip(tab == index, { tab = index }, label = { Text(title) })
@@ -227,13 +233,17 @@ fun PracticeScreen(model: PracticeViewModel) {
 
                     3 -> {
                         item {
-                            Panel(rhythm.plan.pattern.title) {
-                                LessonPlayback(rhythm, { model.startRhythm(preferredOutput) }, model.rhythm::stop)
-                                IntroLessonScore(rhythm)
+                            Panel(if (compactLesson) null else rhythm.plan.pattern.title, compact = compactLesson) {
+                                LessonPlayback(
+                                    rhythm, { model.startRhythm(preferredOutput) }, model.rhythm::stop,
+                                    compact = compactLesson,
+                                )
+                                IntroLessonScore(rhythm, showContext = !compactLesson)
                             }
                         }
                         item {
                             Panel("재생 설정") {
+                                if (compactLesson) IntroLessonGuide()
                                 LessonRangeSettings(rhythm, model.rhythm)
                                 MetronomeSettings(rhythm, model.rhythm)
                             }
@@ -321,10 +331,13 @@ private fun describe(samples: List<Double>, state: PracticeState) =
     else "평균 %.2f ms · 표준편차 %.2f ms (n=%d)".format(samples.average(), state.spread(samples), samples.size)
 
 @Composable
-private fun Panel(title: String, content: @Composable ColumnScope.() -> Unit) {
+private fun Panel(title: String?, compact: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
     ElevatedCard(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(title, style = MaterialTheme.typography.titleLarge)
+        Column(
+            Modifier.padding(if (compact) 10.dp else 16.dp),
+            verticalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 8.dp),
+        ) {
+            if (title != null) Text(title, style = MaterialTheme.typography.titleLarge)
             content()
         }
     }
