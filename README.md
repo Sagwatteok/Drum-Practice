@@ -37,5 +37,7 @@ USB 오디오가 잡히지 않으면 [하드웨어 테스트](docs/HARDWARE_TEST
 - [요구사항](docs/REQUIREMENTS.md)
 - [아키텍처](docs/ARCHITECTURE.md)
 - [단계별 계획](docs/ROADMAP.md)
+- [공통 악보 형식 초안](docs/SCORE_FORMAT.md)
+- [기초 커리큘럼 초안](docs/LEARNING_CURRICULUM.md)
 - [하드웨어 테스트 절차와 결과](docs/HARDWARE_TEST.md)
 - [개발 지침](AGENTS.md)

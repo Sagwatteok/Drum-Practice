@@ -22,4 +22,9 @@ PCM 테스트음 → AudioTrack → Android 미디어 출력 → 선택 시 DTX4
 - 재생 중 BPM이나 반복 설정을 바꾸면 현재 설정의 시작 마디로 이동해 카운트인하고 새 채점을 시작한다. 오디오 경로가 바뀌면 재생을 종료한다. 오프셋 보정과 실기기 출력 지연 측정은 후속 검증 대상으로 남아 있다.
 - 입문 레슨의 한 마디는 8분음표 위치 여덟 개로 정의한다. 악보는 같은 위치의 드럼을 같은 가로 좌표에 그리며, 화면 폭에 따라 두 마디를 나란히 또는 세로로 배치한다. 현재 박과 반복 범위는 재생과 채점에 사용하는 계획에서 가져온다.
 
+## 다음 이행
+
+- MIDI 수신의 허용량을 제한하고 포화 시 버려진 패킷과 파싱된 Note On을 관측한다. 입력·오디오 진행과 채점 상태는 단일 작업에서 처리하고 화면 StateFlow는 결과를 구독한다. 최근 100개 진단 로그는 표시용이며 입력 누락 계수 및 시도별 신뢰도와 구분한다.
+- [공통 Tick 악보](SCORE_FORMAT.md)를 검증한 다음 하나의 재생 계획으로 렌더러와 채점에 전달한다. 현재 고정 4/4 그리드는 내장 레슨의 점진적 이행에 사용한다. 원본을 변경하거나 미지원 표현을 조용히 단순화하지 않는다.
+
 참고 문서 [Android MIDI](https://developer.android.com/reference/android/media/midi/package-summary), [AudioTrack](https://developer.android.com/reference/android/media/AudioTrack), [Yamaha 5선 드럼 악보 예시](https://data.yamaha.com/files/download/other_assets/2/319892/YDD60_en_om.pdf), [AGP 9.1 호환성](https://developer.android.com/build/releases/agp-9-1-0-release-notes)
