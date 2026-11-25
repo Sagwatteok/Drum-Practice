@@ -128,14 +128,10 @@ fun PracticeScreen(model: PracticeViewModel) {
 
                     1 -> {
                         item {
-                            Panel("타격 · ${state.hitCount}회") {
-                                val hit = state.lastHit
-                                if (hit == null) Text("드럼을 치면 최근 타격이 여기에 표시됩니다.")
-                                else {
-                                    Text(hit.drumType?.label ?: "매핑되지 않은 드럼", style = MaterialTheme.typography.headlineLarge)
-                                    Text("${if (state.lastHitMock) "Mock" else "USB"} · Note ${hit.noteNumber} · Velocity ${hit.velocity}")
-                                    LinearProgressIndicator(progress = { hit.velocity / 127f }, modifier = Modifier.fillMaxWidth())
-                                }
+                            Panel("최근 타격") {
+                                HitDisplay("USB", state.usbHits)
+                                HorizontalDivider()
+                                HitDisplay("Mock", state.mockHits)
                                 OutlinedButton(model::clearSession) { Text("세션 초기화") }
                             }
                         }
@@ -143,13 +139,14 @@ fun PracticeScreen(model: PracticeViewModel) {
                             Panel("드럼 세트") {
                                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Drum.entries.forEach { drum ->
-                                        val count = state.drumCounts.getOrDefault(drum, 0)
+                                        val usbCount = state.usbHits.counts.getOrDefault(drum, 0)
+                                        val mockCount = state.mockHits.counts.getOrDefault(drum, 0)
                                         val note = state.mapping[drum]
                                         FilterChip(
-                                            selected = state.lastHit?.drumType == drum,
+                                            selected = drum in state.activePads,
                                             onClick = { model.mockHit(drum) },
                                             enabled = state.mockConnected && state.mappingReady && note != null,
-                                            label = { Text("${drum.label} · $count${if (note == null) " · 미지정" else ""}") },
+                                            label = { Text("${drum.label} · USB $usbCount / Mock $mockCount${if (note == null) " · 미지정" else ""}") },
                                         )
                                     }
                                 }
@@ -230,6 +227,17 @@ fun PracticeScreen(model: PracticeViewModel) {
 }
 
 private fun support(available: Boolean) = if (available) "지원" else "미지원"
+
+@Composable
+private fun HitDisplay(source: String, summary: HitSummary) {
+    Text("$source · ${summary.total}회", style = MaterialTheme.typography.titleMedium)
+    if (summary.latestHits.isEmpty()) Text("타격 대기 중")
+    summary.latestHits.forEach { hit ->
+        Text(hit.drumType?.label ?: "매핑되지 않은 드럼", style = MaterialTheme.typography.headlineSmall)
+        Text("Note ${hit.noteNumber} · Velocity ${hit.velocity}")
+        LinearProgressIndicator(progress = { hit.velocity / 127f }, modifier = Modifier.fillMaxWidth())
+    }
+}
 
 private fun describe(samples: List<Double>, state: PracticeState) =
     if (samples.isEmpty()) "측정값 없음"

@@ -33,6 +33,7 @@ import kotlin.random.Random
 
 private val Application.mappingStore by preferencesDataStore("midi_mapping")
 private const val UNMAPPED = -1
+private const val PAD_HIGHLIGHT_MILLIS = 220L
 
 enum class MockPattern(val label: String) {
     ON_BEAT("정박"), EARLY("이른 타격"), LATE("늦은 타격"), MISSED("누락"),
@@ -53,10 +54,9 @@ data class PracticeState(
     val learning: Drum? = null,
     val noteStatus: String = "",
     val logs: List<MidiLog> = emptyList(),
-    val hitCount: Long = 0,
-    val drumCounts: Map<Drum, Long> = emptyMap(),
-    val lastHit: DrumHitEvent? = null,
-    val lastHitMock: Boolean = false,
+    val usbHits: HitSummary = HitSummary(),
+    val mockHits: HitSummary = HitSummary(),
+    val activePads: Set<Drum> = emptySet(),
     val simultaneousCount: Long = 0,
     val usbDevices: List<String> = emptyList(),
     val mockRunning: Boolean = false,
@@ -91,6 +91,7 @@ class PracticeViewModel internal constructor(
     private val packets = Channel<MidiLog>(256, BufferOverflow.DROP_OLDEST)
     private val mockParser = MidiParser()
     private var mockJob: Job? = null
+    private var highlightJob: Job? = null
     private val input = UsbMidiInput(app) { bytes, messages ->
         packets.trySend(packet(bytes, messages, mock = false, usbAudioRouted = audio.snapshot.value.usbRouted))
     }
@@ -212,7 +213,7 @@ class PracticeViewModel internal constructor(
 
     private fun process(row: MidiLog) {
         val handled = row.copy(handledAtNanos = System.nanoTime())
-        state.update { it.copy(logs = (listOf(handled) + it.logs).take(100)) }
+        val hits = mutableListOf<DrumHitEvent>()
         for (message in row.messages) {
             if (message.kind != MidiKind.NOTE_ON) continue
             val current = state.value
@@ -222,20 +223,36 @@ class PracticeViewModel internal constructor(
                 saveMapping(learned, message.number)
             }
             val drum = learned ?: current.mapping.entries.firstOrNull { it.value == message.number }?.key
-            val hit = DrumHitEvent(message.number, message.value, message.channel, message.timestampNanos,
+            hits += DrumHitEvent(message.number, message.value, message.channel, message.timestampNanos,
                 drum, drum?.articulation, message.receivedAtNanos)
-            state.update {
-                it.copy(lastHit = hit, lastHitMock = row.mock, hitCount = it.hitCount + 1,
-                    drumCounts = if (drum == null) it.drumCounts else
-                        it.drumCounts + (drum to (it.drumCounts.getOrDefault(drum, 0) + 1)),
-                    simultaneousCount = it.simultaneousCount + if (row.usbAudioRouted) 1 else 0)
+        }
+        state.update {
+            val usbHits = if (row.mock) it.usbHits else hits.fold(it.usbHits, HitSummary::add)
+            val mockHits = if (row.mock) hits.fold(it.mockHits, HitSummary::add) else it.mockHits
+            val latest = if (row.mock) mockHits.latestHits else usbHits.latestHits
+            it.copy(
+                logs = (listOf(handled) + it.logs).take(100),
+                usbHits = usbHits,
+                mockHits = mockHits,
+                activePads = if (hits.isEmpty()) it.activePads else latest.mapNotNull { hit -> hit.drumType }.toSet(),
+                simultaneousCount = it.simultaneousCount + if (row.usbAudioRouted) hits.size else 0,
+            )
+        }
+        if (hits.isNotEmpty()) {
+            highlightJob?.cancel()
+            highlightJob = viewModelScope.launch {
+                delay(PAD_HIGHLIGHT_MILLIS)
+                state.update { it.copy(activePads = emptySet()) }
             }
         }
     }
 
     fun clearSession() {
-        state.update { it.copy(logs = emptyList(), hitCount = 0, drumCounts = emptyMap(), lastHit = null,
-            simultaneousCount = 0) }
+        highlightJob?.cancel()
+        state.update {
+            it.copy(logs = emptyList(), usbHits = HitSummary(), mockHits = HitSummary(), activePads = emptySet(),
+                simultaneousCount = 0)
+        }
     }
 
     override fun onCleared() {

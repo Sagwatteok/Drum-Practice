@@ -46,20 +46,35 @@ class MockMappingTest {
             assertNull(updated.mapping[Drum.SNARE])
             instrumentation.runOnMainSync {
                 practice.mockHit(Drum.SNARE)
-                assertEquals(0L, practice.practice.value.hitCount)
+                assertEquals(0L, practice.practice.value.mockHits.total)
                 practice.mockHit(Drum.KICK)
-                assertEquals(1L, practice.practice.value.drumCounts[Drum.KICK])
+                assertEquals(1L, practice.practice.value.mockHits.counts[Drum.KICK])
+                assertEquals(0L, practice.practice.value.usbHits.total)
                 practice.saveMapping(Drum.KICK, null)
             }
             runBlocking { withTimeout(5_000) { practice.practice.first { Drum.KICK !in it.mapping } } }
             instrumentation.runOnMainSync {
                 practice.mockHit(Drum.KICK)
-                assertEquals(1L, practice.practice.value.hitCount)
+                assertEquals(1L, practice.practice.value.mockHits.total)
                 practice.setMockConnected(false)
                 practice.mockHit(Drum.RIDE)
-                assertEquals(1L, practice.practice.value.hitCount)
+                assertEquals(1L, practice.practice.value.mockHits.total)
                 assertFalse(practice.practice.value.mockConnected)
+                practice.setMockConnected(true)
+                practice.saveMapping(Drum.KICK, 36)
             }
+            runBlocking { withTimeout(5_000) { practice.practice.first { it.mapping[Drum.KICK] == 36 } } }
+            instrumentation.runOnMainSync {
+                practice.clearSession()
+                practice.startMock(120, MockPattern.CHORD)
+            }
+            val pads = setOf(Drum.KICK, Drum.CLOSED_HI_HAT)
+            val chord = runBlocking { withTimeout(5_000) { practice.practice.first { it.activePads == pads } } }
+            assertEquals(pads, chord.mockHits.latestHits.map { it.drumType }.toSet())
+            assertEquals(0L, chord.usbHits.total)
+            instrumentation.runOnMainSync { practice.stopMock() }
+            val settled = runBlocking { withTimeout(4_000) { practice.practice.first { it.activePads.isEmpty() } } }
+            assertEquals(pads, settled.mockHits.latestHits.map { it.drumType }.toSet())
         } finally {
             instrumentation.runOnMainSync { models.clear() }
             scope.cancel()

@@ -10,7 +10,7 @@ Yamaha DTX452K(DTX402)와 Galaxy S23 Ultra를 USB-C ↔ USB-B 데이터 케이�
 - Note On/Off, Velocity, 채널, Control Change, 원본 바이트와 단조 증가 시각 표시
 - 출력 장치 목록, 선택 가능한 USB 오디오 경로, 120 BPM 테스트음과 AudioTrack 실제 라우팅 표시, 재생 중 실제 USB MIDI 카운터
 - 드럼별 매핑, MIDI Learn, 직접 편집과 로컬 저장. 초기 노트는 General MIDI 예시로 사용한다.
-- 자유 연주의 드럼별 횟수, 타격 강도 및 최근 타격, 최근 진단 로그와 초기화
+- 자유 연주의 USB·Mock별 횟수, 드럼별 타격 강도와 동시 타격 표시, 최근 진단 로그와 초기화
 - 화면 터치 및 BPM 기반 Mock 입력, 정박·이른 타격·늦은 타격·누락·다른 드럼·동시 타격·임의 편차·연결 해제 시뮬레이션
 - 세로·가로, 시스템 다크 모드, 연주 중 화면 켜짐 유지
 
