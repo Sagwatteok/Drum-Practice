@@ -40,9 +40,13 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.sagwatteok.drumpractice.core.midi.Drum
 import io.github.sagwatteok.drumpractice.core.midi.MidiKind
-import io.github.sagwatteok.drumpractice.feature.practice.MetronomeControls
+import io.github.sagwatteok.drumpractice.feature.practice.IntroLessonScore
+import io.github.sagwatteok.drumpractice.feature.practice.LessonPlayback
+import io.github.sagwatteok.drumpractice.feature.practice.LessonRangeSettings
+import io.github.sagwatteok.drumpractice.feature.practice.MetronomeSettings
 import io.github.sagwatteok.drumpractice.feature.practice.PracticeMockPads
 import io.github.sagwatteok.drumpractice.feature.practice.PracticeScores
+import io.github.sagwatteok.drumpractice.feature.practice.introPads
 
 private val primaryPads = listOf(Drum.KICK, Drum.SNARE, Drum.CLOSED_HI_HAT)
 private val otherPads = Drum.entries - primaryPads.toSet()
@@ -65,7 +69,7 @@ fun PracticeScreen(model: PracticeViewModel) {
             Text("Drum Practice", Modifier.padding(top = 12.dp), style = MaterialTheme.typography.headlineMedium)
             Text(midi.active?.name?.let { "MIDI 연결 · $it" } ?: midi.status)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("연결 진단", "자유 연주", "매핑", "연습").forEachIndexed { index, title ->
+                listOf("연결 진단", "자유 연주", "매핑", "레슨").forEachIndexed { index, title ->
                     FilterChip(tab == index, { tab = index }, label = { Text(title) })
                 }
             }
@@ -223,13 +227,23 @@ fun PracticeScreen(model: PracticeViewModel) {
 
                     3 -> {
                         item {
-                            Panel("메트로놈 · ${rhythm.plan.pattern.title}") {
-                                MetronomeControls(rhythm, model.rhythm) { model.startRhythm(preferredOutput) }
+                            Panel(rhythm.plan.pattern.title) {
+                                LessonPlayback(rhythm, { model.startRhythm(preferredOutput) }, model.rhythm::stop)
+                                IntroLessonScore(rhythm)
+                            }
+                        }
+                        item {
+                            Panel("재생 설정") {
+                                LessonRangeSettings(rhythm, model.rhythm)
+                                MetronomeSettings(rhythm, model.rhythm)
                             }
                         }
                         item {
                             Panel("Mock 패드") {
-                                PracticeMockPads(listOf(Drum.KICK), state.mockConnected && state.mappingReady, model::mockHit)
+                                PracticeMockPads(
+                                    introPads, state.mockConnected && state.mappingReady,
+                                    model::mockHit,
+                                )
                             }
                         }
                         item {
@@ -273,7 +287,7 @@ private fun DrumPad(drum: Drum, state: PracticeState, onHit: (Drum) -> Unit, mod
         onClick = { onHit(drum) },
         enabled = state.mockConnected && state.mappingReady && mapped,
         modifier = padModifier,
-        label = { Text(if (drum == Drum.CLOSED_HI_HAT) "닫힌 하이햇" else drum.label) },
+        label = { Text(drum.label) },
     )
 }
 

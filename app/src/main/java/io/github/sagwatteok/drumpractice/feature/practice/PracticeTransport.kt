@@ -10,10 +10,8 @@ import io.github.sagwatteok.drumpractice.core.scoring.PracticeScore
 import io.github.sagwatteok.drumpractice.core.scoring.PracticeScorer
 import io.github.sagwatteok.drumpractice.core.timing.AudioFrameAnchor
 import io.github.sagwatteok.drumpractice.core.timing.ClockSource
-import io.github.sagwatteok.drumpractice.core.timing.PracticePattern
 import io.github.sagwatteok.drumpractice.core.timing.PracticePlan
 import io.github.sagwatteok.drumpractice.core.timing.PracticePosition
-import io.github.sagwatteok.drumpractice.core.timing.STEPS_PER_BAR
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -22,12 +20,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-private val quarterKick = PracticePattern("킥 4분음표", listOf(List(STEPS_PER_BAR) { step ->
-    if (step % 2 == 0) setOf(Drum.KICK) else emptySet()
-}))
-
 data class TransportState(
-    val plan: PracticePlan = PracticePlan(60, quarterKick),
+    val plan: PracticePlan = PracticePlan(60, introLesson),
     val running: Boolean = false,
     val position: PracticePosition? = null,
     val clockSource: ClockSource? = null,

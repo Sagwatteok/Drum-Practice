@@ -33,6 +33,7 @@ class PracticeScorer(private val plan: PracticePlan) {
     }
 
     private val ledgers = HitSource.entries.associateWith { Ledger() }
+    private val firstPlayingFrame = plan.frameAtStep(plan.firstPlayingStep)
 
     fun scores(): Map<HitSource, PracticeScore> = ledgers.mapValues { it.value.score }
 
@@ -40,7 +41,7 @@ class PracticeScorer(private val plan: PracticePlan) {
         val ledger = ledgers.getValue(source)
         if (ledger.nextStep == null) {
             ledger.nextStep = plan.stepAtFrame(frame - WINDOW_FRAMES).coerceAtLeast(plan.firstPlayingStep)
-            ledger.acceptsFrom = plan.frameAtStep(plan.firstPlayingStep) - WINDOW_FRAMES
+            ledger.acceptsFrom = firstPlayingFrame
         }
     }
 
@@ -49,7 +50,7 @@ class PracticeScorer(private val plan: PracticePlan) {
         val first = if (plan.frameAtStep(step) < frame) step + 1 else step
         ledgers.getValue(source).apply {
             nextStep = maxOf(first, plan.firstPlayingStep)
-            acceptsFrom = maxOf(frame, plan.frameAtStep(plan.firstPlayingStep) - WINDOW_FRAMES)
+            acceptsFrom = maxOf(frame, firstPlayingFrame)
         }
     }
 
@@ -61,7 +62,7 @@ class PracticeScorer(private val plan: PracticePlan) {
     }
 
     fun hit(source: HitSource, drum: Drum?, frame: Long): JudgedHit? {
-        if (frame < plan.frameAtStep(plan.firstPlayingStep) - WINDOW_FRAMES ||
+        if (frame < firstPlayingFrame ||
             plan.endFrame?.let { frame >= it } == true) return null
 
         arm(source, frame)

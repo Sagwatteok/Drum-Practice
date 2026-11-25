@@ -15,6 +15,9 @@ import io.github.sagwatteok.drumpractice.core.midi.MidiKind
 import io.github.sagwatteok.drumpractice.core.midi.MidiMessage
 import io.github.sagwatteok.drumpractice.core.midi.MidiPacketReceiver
 import io.github.sagwatteok.drumpractice.core.midi.MidiPort
+import io.github.sagwatteok.drumpractice.core.scoring.HitSource
+import io.github.sagwatteok.drumpractice.core.scoring.Judgment
+import io.github.sagwatteok.drumpractice.feature.practice.TransportState
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -32,6 +35,41 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class MockMappingTest {
+    @Test fun changingTempoKeepsTheSelectedMeasureAndMockScoresOnlyItsOwnChords() = withPractice { practice, _ ->
+        val transport = practice.rhythm
+        onMain {
+            transport.setPlan(transport.snapshot.value.plan.copy(bars = 1..1, firstBar = 1))
+            transport.setAutoMock(true)
+            practice.startRhythm(null)
+        }
+        try {
+            awaitLesson(practice) { it.plan.bpm == 60 && it.position?.beat == 1 }
+            onMain { transport.setBpm(50) }
+            val newCountIn = awaitLesson(practice) {
+                it.plan.bpm == 50 && it.position.let { position -> position != null && position.bar == null }
+            }
+            assertEquals(1..1, newCountIn.plan.bars)
+            assertEquals(1, newCountIn.plan.firstBar)
+            val downbeat = awaitLesson(practice) {
+                it.position?.let { position -> position.bar == 1 && position.stepInBar == 0 } == true &&
+                    (it.scores[HitSource.MOCK]?.count(Judgment.PERFECT) ?: 0) >= 2
+            }
+            assertEquals(1, downbeat.position?.beat)
+            assertEquals(0, downbeat.scores.getValue(HitSource.USB).points)
+            awaitLesson(practice) {
+                it.position?.let { position -> position.bar == 1 && position.stepInBar >= 6 } == true
+            }
+            val repeated = awaitLesson(practice) {
+                it.position?.let { position -> position.bar == 1 && position.stepInBar == 0 } == true
+            }
+            assertEquals(50, repeated.plan.bpm)
+            assertEquals(1, repeated.position?.beat)
+            assertEquals(0, repeated.scores.getValue(HitSource.USB).count(Judgment.MISS))
+        } finally {
+            onMain { transport.stop() }
+        }
+    }
+
     @Test fun learnRequiresActivePortAndDoesNotSurviveSessionChanges() = withPractice { practice, input ->
         onMain {
             practice.learn(Drum.KICK)
@@ -133,6 +171,9 @@ class MockMappingTest {
 
     private fun await(practice: PracticeViewModel, predicate: (PracticeState) -> Boolean) =
         runBlocking { withTimeout(5_000) { practice.practice.first(predicate) } }
+
+    private fun awaitLesson(practice: PracticeViewModel, predicate: (TransportState) -> Boolean) =
+        runBlocking { withTimeout(9_000) { practice.rhythm.snapshot.first(predicate) } }
 
     private fun onMain(block: () -> Unit) = InstrumentationRegistry.getInstrumentation().runOnMainSync(block)
 

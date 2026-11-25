@@ -10,7 +10,7 @@ enum class Drum(val label: String, val defaultNote: Int?, val articulation: Arti
     HI_HAT("하이햇", null),
     HI_HAT_PEDAL("하이햇 페달", 44, Articulation.PEDAL),
     OPEN_HI_HAT("오픈 하이햇", 46, Articulation.OPEN),
-    CLOSED_HI_HAT("클로즈드 하이햇", 42, Articulation.CLOSED),
+    CLOSED_HI_HAT("닫힌 하이햇", 42, Articulation.CLOSED),
     TOM_1("탐 1", 50),
     TOM_2("탐 2", 47),
     FLOOR_TOM("플로어 탐", 45),

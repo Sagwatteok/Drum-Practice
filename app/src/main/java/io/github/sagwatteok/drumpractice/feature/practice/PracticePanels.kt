@@ -25,10 +25,9 @@ import io.github.sagwatteok.drumpractice.core.scoring.Judgment
 import io.github.sagwatteok.drumpractice.core.scoring.PracticeScore
 
 @Composable
-fun MetronomeControls(state: TransportState, transport: PracticeTransport, start: () -> Unit) {
+fun MetronomeSettings(state: TransportState, transport: PracticeTransport) {
     var bpmText by rememberSaveable(state.plan.bpm) { mutableStateOf(state.plan.bpm.toString()) }
     val newBpm = bpmText.toIntOrNull()?.takeIf { it in 40..240 }
-    Text("템포 · ${state.plan.bpm} BPM", style = MaterialTheme.typography.titleMedium)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedTextField(
             value = bpmText,
@@ -49,18 +48,49 @@ fun MetronomeControls(state: TransportState, transport: PracticeTransport, start
         FilterChip(selected = state.autoMock, onClick = { transport.setAutoMock(!state.autoMock) },
             enabled = !state.running, label = { Text("Mock 자동 타격") })
     }
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Button(start, enabled = !state.running) { Text("재생") }
-        OutlinedButton(transport::stop, enabled = state.running) { Text("정지") }
-    }
-    val position = state.position
-    if (position != null) {
-        Text(if (position.bar == null) "카운트인 · ${position.beat}/4박"
-            else "${position.bar + 1}마디 · ${position.beat}/4박", style = MaterialTheme.typography.headlineSmall)
-    }
-    if (state.message.isNotBlank()) Text(state.message)
     state.clockSource?.let { Text(it.label, style = MaterialTheme.typography.bodySmall) }
     state.output?.let { Text("오디오 출력 · $it", style = MaterialTheme.typography.bodySmall) }
+}
+
+@Composable
+fun LessonPlayback(state: TransportState, start: () -> Unit, stop: () -> Unit) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Button(start, enabled = !state.running) { Text("재생") }
+        OutlinedButton(stop, enabled = state.running) { Text("정지") }
+    }
+    val position = state.position
+    val status = when {
+        position == null -> state.message.ifBlank { "연습 대기 중" }
+        position.bar == null -> "카운트인 · ${position.beat}/4박"
+        else -> "현재 · ${position.bar + 1}마디 · ${position.beat}/4박"
+    }
+    Text("${state.plan.bpm} BPM · $status", style = MaterialTheme.typography.titleMedium)
+}
+
+@Composable
+fun LessonRangeSettings(state: TransportState, transport: PracticeTransport) {
+    val plan = state.plan
+    Text("시작 마디", style = MaterialTheme.typography.titleMedium)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        for (bar in plan.pattern.bars.indices) {
+            FilterChip(
+                selected = plan.firstBar == bar,
+                onClick = { transport.setPlan(plan.copy(firstBar = bar)) },
+                enabled = bar in plan.bars,
+                label = { Text("${bar + 1}마디부터") },
+            )
+        }
+    }
+    Text("연주 구간", style = MaterialTheme.typography.titleMedium)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        for (range in listOf(0..1, 0..0, 1..1)) {
+            FilterChip(
+                selected = range == plan.bars,
+                onClick = { transport.setPlan(plan.copy(bars = range, firstBar = plan.firstBar.takeIf { it in range } ?: range.first)) },
+                label = { Text(barRangeLabel(range)) },
+            )
+        }
+    }
 }
 
 @Composable

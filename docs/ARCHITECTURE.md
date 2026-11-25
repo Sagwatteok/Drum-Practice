@@ -20,5 +20,6 @@ PCM 테스트음 → AudioTrack → Android 미디어 출력 → 선택 시 DTX4
 - 메트로놈은 48 kHz PCM을 별도 작업에서 스트리밍한다. 카운트인, 박자 표시, MIDI 채점은 같은 오디오 프레임 계획을 사용한다. `AudioTrack.getTimestamp()`의 프레임과 단조 증가 시각을 연결하고, 타임스탬프를 읽을 수 없는 경로에서는 재생 헤드 샘플로 대체한다. 화면 갱신 시각은 채점에 쓰지 않는다.
 - USB와 Mock은 각각 채점한다. 동시 타격은 악기별로 소비하고, 같은 악기의 판정창이 겹치면 Perfect 후보를 우선한 뒤 앞선 미적중 노트를 선택한다. USB 포트를 분리하면 기존 점수를 보존하고 재연결 시 그 이후 기대 노트부터 다시 집계한다.
 - 재생 중 BPM이나 반복 설정을 바꾸면 현재 설정의 시작 마디로 이동해 카운트인하고 새 채점을 시작한다. 오디오 경로가 바뀌면 재생을 종료한다. 오프셋 보정과 실기기 출력 지연 측정은 후속 검증 대상으로 남아 있다.
+- 입문 레슨의 한 마디는 8분음표 위치 여덟 개로 정의한다. 악보는 같은 위치의 드럼을 같은 가로 좌표에 그리며, 화면 폭에 따라 두 마디를 나란히 또는 세로로 배치한다. 현재 박과 반복 범위는 재생과 채점에 사용하는 계획에서 가져온다.
 
-참고 문서 [Android MIDI](https://developer.android.com/reference/android/media/midi/package-summary), [오디오 지연](https://source.android.com/docs/core/audio/latency/app), [AGP 9.1 호환성](https://developer.android.com/build/releases/agp-9-1-0-release-notes)
+참고 문서 [Android MIDI](https://developer.android.com/reference/android/media/midi/package-summary), [AudioTrack](https://developer.android.com/reference/android/media/AudioTrack), [Yamaha 5선 드럼 악보 예시](https://data.yamaha.com/files/download/other_assets/2/319892/YDD60_en_om.pdf), [AGP 9.1 호환성](https://developer.android.com/build/releases/agp-9-1-0-release-notes)
