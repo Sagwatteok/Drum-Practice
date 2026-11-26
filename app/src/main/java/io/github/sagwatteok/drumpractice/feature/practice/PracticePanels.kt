@@ -63,6 +63,7 @@ fun LessonPlayback(state: TransportState, start: () -> Unit, stop: () -> Unit, c
         else -> "현재 · ${position.bar + 1}마디 · ${position.beat}/4박"
     }
     val positionText = "${state.plan.bpm} BPM · $status"
+    val loss = state.inputLoss
     if (compact) {
         Row(
             Modifier.fillMaxWidth(),
@@ -79,6 +80,13 @@ fun LessonPlayback(state: TransportState, start: () -> Unit, stop: () -> Unit, c
     } else {
         PlaybackButtons(state, start, stop)
         Text(positionText, style = MaterialTheme.typography.titleMedium)
+    }
+    if (loss.packets > 0) {
+        Text(
+            "신뢰도 저하 · 입력 패킷 ${loss.packets}개, 채점 타격 ${loss.noteOns}개 누락",
+            color = MaterialTheme.colorScheme.error,
+            style = MaterialTheme.typography.bodyMedium,
+        )
     }
 }
 

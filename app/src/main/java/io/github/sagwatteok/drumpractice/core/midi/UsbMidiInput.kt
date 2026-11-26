@@ -140,16 +140,14 @@ internal class UsbMidiInput(context: Context, private val receive: MidiPacketRec
                         output = midiPort
                         val parser = MidiParser()
                         midiPort.connect(object : MidiReceiver() {
+                            @Synchronized
                             override fun onSend(data: ByteArray, offset: Int, count: Int, timestamp: Long) {
+                                if (closed || generation != token) return
                                 val received = System.nanoTime()
                                 val bytes = data.copyOfRange(offset, offset + count)
-                                handler.post {
-                                    if (!closed && generation == token) {
-                                        val messages = mutableListOf<MidiMessage>()
-                                        parser.accept(bytes, timestamp, received, messages::add)
-                                        receive(bytes, messages, token)
-                                    }
-                                }
+                                val messages = mutableListOf<MidiMessage>()
+                                parser.accept(bytes, timestamp, received, messages::add)
+                                if (!closed && generation == token) receive(bytes, messages, token)
                             }
                         })
                     }.isSuccess

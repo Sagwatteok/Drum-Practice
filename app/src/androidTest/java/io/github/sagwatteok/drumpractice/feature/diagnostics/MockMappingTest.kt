@@ -17,11 +17,17 @@ import io.github.sagwatteok.drumpractice.core.midi.MidiPacketReceiver
 import io.github.sagwatteok.drumpractice.core.midi.MidiPort
 import io.github.sagwatteok.drumpractice.core.scoring.HitSource
 import io.github.sagwatteok.drumpractice.core.scoring.Judgment
+import io.github.sagwatteok.drumpractice.feature.practice.InputLoss
 import io.github.sagwatteok.drumpractice.feature.practice.TransportState
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -30,11 +36,99 @@ import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class MockMappingTest {
+    @Test fun overloadKeepsAcceptedChordsAndMarksOnlyTheAffectedAttempt() {
+        val executor = Executors.newSingleThreadExecutor()
+        executor.asCoroutineDispatcher().use { worker ->
+            withPractice(worker) { practice, input ->
+                input.attach(1)
+                onMain {
+                    practice.rhythm.setBpm(240)
+                    practice.startRhythm(null)
+                }
+                val playing = awaitLesson(practice) { it.position?.let { p -> p.bar == 0 && p.stepInBar == 0 } == true }
+                val target = playing.plan.frameAtStep(playing.plan.firstPlayingStep)
+                val anchor = checkNotNull(practice.rhythm.capturedReading()).sample.anchor
+                val time = anchor.nanoTimeAt(target)
+
+                val frozen = CountDownLatch(1)
+                val release = CountDownLatch(1)
+                executor.execute {
+                    frozen.countDown()
+                    check(release.await(5, TimeUnit.SECONDS))
+                }
+                assertTrue(frozen.await(5, TimeUnit.SECONDS))
+                val loss: InputLoss
+                try {
+                    repeat(320) { index ->
+                        input.chord(1, time + index * 1_000L)
+                    }
+                    val rejected = practice.inputLoss.value
+                    assertTrue(rejected.packets > 0)
+                    assertEquals(rejected.packets * 2, rejected.noteOns)
+                    input.controlChange(1, time)
+                    loss = practice.inputLoss.value
+                    assertEquals(rejected.packets + 1, loss.packets)
+                    assertEquals(rejected.noteOns, loss.noteOns)
+                    // Packets preceding the disconnect still belong to the original attempt.
+                    input.disconnect()
+                    input.chord(1, time)
+                    assertEquals(loss.add(2), practice.inputLoss.value)
+                    Thread.sleep(200L)
+                } finally {
+                    release.countDown()
+                }
+
+                val accepted = 320 - (loss.packets - 1).toInt()
+                assertTrue(accepted > 100)
+                val received = await(practice) { it.usbHits.total == accepted * 2L }
+                assertEquals(100, received.logs.size)
+                assertEquals((accepted - 1 downTo accepted - 100).map { time + it * 1_000L },
+                    received.logs.map { it.messages.first().timestampNanos })
+                val affected = awaitLesson(practice) { it.inputLoss == loss }
+                assertEquals(2, affected.scores.getValue(HitSource.USB).count(Judgment.PERFECT))
+                onMain { practice.rhythm.stop() }
+                awaitLesson(practice) { !it.running && it.inputLoss == loss }
+
+                onMain { practice.clearSession() }
+                await(practice) { it.usbHits.total == 0L && it.logs.isEmpty() }
+                assertEquals(InputLoss(), practice.inputLoss.value)
+                assertEquals(loss, practice.rhythm.snapshot.value.inputLoss)
+                input.attach(2)
+                onMain {
+                    input.note(2, 38)
+                    // The owner must make progress even while the Android main thread is occupied.
+                    await(practice) { it.usbHits.total == 1L }
+                }
+                onMain { practice.startRhythm(null) }
+                awaitLesson(practice) { it.running && it.inputLoss == InputLoss() }
+                onMain { practice.rhythm.stop() }
+                awaitLesson(practice) { !it.running }
+            }
+        }
+    }
+
+    @Test fun rapidTempoChangesAndStopRestartUseTheLastPlan() = withPractice { practice, _ ->
+        onMain { practice.startRhythm(null) }
+        awaitLesson(practice) { it.position != null }
+        onMain {
+            practice.rhythm.setBpm(50)
+            practice.rhythm.setBpm(55)
+            practice.rhythm.stop()
+            practice.startRhythm(null)
+        }
+        val restarted = awaitLesson(practice) { it.plan.bpm == 55 && it.position != null }
+        assertTrue(restarted.running)
+        assertNull(restarted.position?.bar)
+        onMain { practice.rhythm.stop() }
+        awaitLesson(practice) { !it.running }
+    }
+
     @Test fun changingTempoKeepsTheSelectedMeasureAndMockScoresOnlyItsOwnChords() = withPractice { practice, _ ->
         val transport = practice.rhythm
         onMain {
@@ -109,12 +203,12 @@ class MockMappingTest {
         assertNull(updated.mapping[Drum.SNARE])
         onMain {
             practice.mockHit(Drum.SNARE)
-            assertEquals(0L, practice.practice.value.mockHits.total)
             practice.mockHit(Drum.KICK)
-            assertEquals(1L, practice.practice.value.mockHits.counts[Drum.KICK])
-            assertEquals(0L, practice.practice.value.usbHits.total)
-            practice.saveMapping(Drum.KICK, null)
         }
+        val mapped = await(practice) { it.mockHits.total == 1L }
+        assertEquals(1L, mapped.mockHits.counts[Drum.KICK])
+        assertEquals(0L, mapped.usbHits.total)
+        onMain { practice.saveMapping(Drum.KICK, null) }
         await(practice) { Drum.KICK !in it.mapping }
         onMain {
             practice.mockHit(Drum.KICK)
@@ -140,7 +234,10 @@ class MockMappingTest {
         assertEquals(pads, settled.mockHits.latestHits.map { it.drumType }.toSet())
     }
 
-    private fun withPractice(test: (PracticeViewModel, TestMidiInput) -> Unit) {
+    private fun withPractice(
+        dispatcher: CoroutineDispatcher = Dispatchers.Default,
+        test: (PracticeViewModel, TestMidiInput) -> Unit,
+    ) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val app = instrumentation.targetContext.applicationContext as Application
         val mappings = File(app.cacheDir, "mock-mapping-${System.nanoTime()}.preferences_pb")
@@ -152,7 +249,7 @@ class MockMappingTest {
         onMain {
             val factory = viewModelFactory {
                 initializer {
-                    PracticeViewModel(app, dataStore) { _, receive ->
+                    PracticeViewModel(app, dataStore, dispatcher) { _, receive ->
                         TestMidiInput(receive).also { input = it }
                     }
                 }
@@ -189,6 +286,18 @@ class MockMappingTest {
         fun note(session: Int, note: Int, received: Long = System.nanoTime()) {
             val message = MidiMessage(MidiKind.NOTE_ON, 10, note, 100, received, received, received)
             receive(byteArrayOf(0x99.toByte(), note.toByte(), 100), listOf(message), session)
+        }
+
+        fun chord(session: Int, timestamp: Long) {
+            val messages = listOf(36, 42).map { note ->
+                MidiMessage(MidiKind.NOTE_ON, 10, note, 100, timestamp, System.nanoTime(), timestamp)
+            }
+            receive(byteArrayOf(0x99.toByte(), 36, 100, 42, 100), messages, session)
+        }
+
+        fun controlChange(session: Int, timestamp: Long) {
+            val cc = MidiMessage(MidiKind.CONTROL_CHANGE, 10, 4, 100, timestamp, System.nanoTime(), timestamp)
+            receive(byteArrayOf(0xb9.toByte(), 4, 100), listOf(cc), session)
         }
 
         override fun rescan() = Unit

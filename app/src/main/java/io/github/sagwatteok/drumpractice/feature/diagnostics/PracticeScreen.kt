@@ -60,6 +60,7 @@ fun PracticeScreen(model: PracticeViewModel) {
     val midi by model.connection.collectAsStateWithLifecycle()
     val audio by model.audio.snapshot.collectAsStateWithLifecycle()
     val rhythm by model.rhythm.snapshot.collectAsStateWithLifecycle()
+    val inputLoss by model.inputLoss.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf(0) }
     val compactLesson = tab == 3 && LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val listState = key(tab, compactLesson) { rememberLazyListState() }
@@ -130,6 +131,7 @@ fun PracticeScreen(model: PracticeViewModel) {
                                 Text("MIDI 시각 → 앱 수신 · ${describe(state.usbTimestampSamplesMs, state)}")
                                 Text("앱 수신 → 처리 · ${describe(state.usbProcessingSamplesMs, state)}")
                                 Text("최근 100개 패킷 기준. 로그의 시각은 단조 증가 시간(ns)입니다.")
+                                Text("큐 포화 누락 · 패킷 ${inputLoss.packets}개 · Note On 타격 ${inputLoss.noteOns}개")
                                 OutlinedButton(model::clearSession) { Text("세션 초기화") }
                             }
                         }
@@ -257,7 +259,8 @@ fun PracticeScreen(model: PracticeViewModel) {
                             }
                         }
                         item {
-                            Panel("채점") { PracticeScores(rhythm.scores) }
+                            val scoreTitle = if (rhythm.inputLoss.packets > 0) "채점 · 신뢰도 저하" else "채점"
+                            Panel(scoreTitle) { PracticeScores(rhythm.scores) }
                         }
                     }
                 }

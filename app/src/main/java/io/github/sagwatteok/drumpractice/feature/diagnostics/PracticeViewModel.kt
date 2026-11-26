@@ -22,11 +22,14 @@ import io.github.sagwatteok.drumpractice.core.midi.MidiParser
 import io.github.sagwatteok.drumpractice.core.midi.MidiPort
 import io.github.sagwatteok.drumpractice.core.midi.UsbMidiInput
 import io.github.sagwatteok.drumpractice.core.scoring.HitSource
+import io.github.sagwatteok.drumpractice.feature.practice.InputLoss
+import io.github.sagwatteok.drumpractice.feature.practice.PracticeEventQueue
 import io.github.sagwatteok.drumpractice.feature.practice.PracticeTransport
+import io.github.sagwatteok.drumpractice.feature.practice.UsbObservation
 import java.io.IOException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -46,13 +49,15 @@ enum class MockPattern(val label: String) {
 }
 
 data class MidiLog(
-    val hex: String,
+    private val bytes: ByteArray,
     val messages: List<MidiMessage>,
     val mock: Boolean,
     val usbAudioRouted: Boolean,
     val handledAtNanos: Long,
     val inputSession: Int? = null,
-)
+) {
+    val hex: String get() = bytes.joinToString(" ") { "%02X".format(it.toInt() and 0xff) }
+}
 
 data class MidiLearnRequest(val drum: Drum, val inputSession: Int, val startedAtNanos: Long)
 
@@ -91,22 +96,23 @@ data class PracticeState(
 class PracticeViewModel internal constructor(
     private val app: Application,
     private val mappingStore: DataStore<Preferences>,
+    eventDispatcher: CoroutineDispatcher = Dispatchers.Default,
     createInput: (Context, MidiPacketReceiver) -> MidiInput = ::UsbMidiInput,
 ) : AndroidViewModel(app) {
     constructor(app: Application) : this(app, app.mappingStore)
     private val state = MutableStateFlow(PracticeState())
     val practice = state.asStateFlow()
     val audio = AudioProbe(app)
-    private val packets = Channel<MidiLog>(256, BufferOverflow.DROP_OLDEST)
-    private val mockParser = MidiParser()
+    private val events = PracticeEventQueue(viewModelScope, eventDispatcher)
+    private val dropped = MutableStateFlow(InputLoss())
+    val inputLoss = dropped.asStateFlow()
     private var mockJob: Job? = null
     private var highlightJob: Job? = null
-    private val input = createInput(app) { bytes, messages, session ->
-        packets.trySend(packet(bytes, messages, mock = false, usbAudioRouted = audio.snapshot.value.usbRouted)
-            .copy(inputSession = session))
-    }
+    private val input = createInput(app, ::receiveUsb)
     val connection = input.connection
-    val rhythm = PracticeTransport(app, viewModelScope, { connection.value.activeSession }, ::mockNotes)
+    val rhythm = PracticeTransport(app, viewModelScope, events, ::observeUsb) { drums, at ->
+        createMockPacket(drums, at)?.let { process(it, null) }
+    }
     val midiSupported = input.supported
     val hostSupported = app.packageManager.hasSystemFeature(PackageManager.FEATURE_USB_HOST)
 
@@ -122,12 +128,11 @@ class PracticeViewModel internal constructor(
                 state.update { it.copy(mapping = mapping, mappingReady = true) }
             }
         }
-        viewModelScope.launch { for (row in packets) process(row) }
-        viewModelScope.launch {
-            connection.collect { midi ->
-                rhythm.usbConnectionChanged()
+        viewModelScope.launch(Dispatchers.Default) {
+            connection.collect {
+                rhythm.usbConnectionChanged(observeUsb())
                 refreshUsbDevices()
-                if (state.value.learning?.let { it.inputSession != midi.activeSession } == true) {
+                if (state.value.learning?.let { it.inputSession != connection.value.activeSession } == true) {
                     cancelLearn("MIDI 연결이 바뀌어 Learn 대기가 취소되었습니다")
                 }
             }
@@ -247,34 +252,61 @@ class PracticeViewModel internal constructor(
     }
 
     private fun mockNotes(drums: List<Drum>, at: Long) {
-        val current = state.value
-        if (!current.mockConnected || !current.mappingReady) return
-        val bytes = drums.mapNotNull(current.mapping::get)
-            .flatMap { listOf(0x99.toByte(), it.toByte(), 100.toByte()) }.toByteArray()
-        if (bytes.isEmpty()) return
-        val messages = mutableListOf<MidiMessage>()
-        mockParser.accept(bytes, at, System.nanoTime(), messages::add)
-        process(packet(bytes, messages, mock = true, usbAudioRouted = false))
+        createMockPacket(drums, at)?.let { enqueue(it, null) }
     }
 
-    private fun process(row: MidiLog) {
+    private fun createMockPacket(drums: List<Drum>, at: Long): MidiLog? {
+        val current = state.value
+        if (!current.mockConnected || !current.mappingReady) return null
+        val bytes = drums.mapNotNull(current.mapping::get)
+            .flatMap { listOf(0x99.toByte(), it.toByte(), 100.toByte()) }.toByteArray()
+        if (bytes.isEmpty()) return null
+        val messages = mutableListOf<MidiMessage>()
+        MidiParser().accept(bytes, at, System.nanoTime(), messages::add)
+        return MidiLog(bytes, messages, mock = true, usbAudioRouted = false, handledAtNanos = 0)
+    }
+
+    private fun receiveUsb(bytes: ByteArray, messages: List<MidiMessage>, session: Int) {
+        val row = MidiLog(bytes, messages, mock = false, usbAudioRouted = audio.snapshot.value.usbRouted,
+            handledAtNanos = 0, inputSession = session)
+        enqueue(row, observeUsb())
+    }
+
+    private fun observeUsb(): UsbObservation {
+        while (true) {
+            val current = connection.value
+            val clock = System.nanoTime()
+            if (current === connection.value) return UsbObservation(current.activeSession, clock)
+        }
+    }
+
+    private fun enqueue(row: MidiLog, observation: UsbObservation?) {
+        val intake = if (row.mock || row.inputSession == observation?.session) rhythm.currentIntake() else null
+        val reading = rhythm.capturedReading()
+        events.offerMidi(onSaturated = {
+            val hits = row.messages.count { it.kind == MidiKind.NOTE_ON }
+            intake?.let { rhythm.recordLoss(it, hits) }
+            dropped.update { it.add(hits) }
+        }, action = {
+            observation?.let(rhythm::observeConnection)
+            process(row, reading)
+        })
+    }
+
+    private fun process(row: MidiLog, reading: PracticeTransport.Reading?) {
         val handled = row.copy(handledAtNanos = System.nanoTime())
         val hits = mutableListOf<DrumHitEvent>()
         for (message in row.messages) {
             if (message.kind != MidiKind.NOTE_ON) continue
-            val current = state.value
-            val learned = current.learning?.takeIf {
-                it.inputSession == row.inputSession && it.inputSession == connection.value.activeSession &&
-                    message.receivedAtNanos >= it.startedAtNanos
-            }?.drum
-            if (learned != null) {
-                cancelLearn()
-                saveMapping(learned, message.number)
-            }
-            val drum = learned ?: current.mapping.entries.firstOrNull { it.value == message.number }?.key
+            val learned = consumeLearn(row.inputSession, message.receivedAtNanos)
+            if (learned != null) saveMapping(learned, message.number)
+            val drum = learned ?: state.value.mapping.entries.firstOrNull { it.value == message.number }?.key
             hits += DrumHitEvent(message.number, message.value, message.channel, message.timestampNanos,
                 drum, drum?.articulation, message.receivedAtNanos)
         }
+        val source = if (row.mock) HitSource.MOCK else HitSource.USB
+        hits.forEach { rhythm.hit(source, it, row.inputSession, reading) }
+        rhythm.publishInput()
         state.update {
             val usbHits = if (row.mock) it.usbHits else hits.fold(it.usbHits, HitSummary::add)
             val mockHits = if (row.mock) hits.fold(it.mockHits, HitSummary::add) else it.mockHits
@@ -288,8 +320,6 @@ class PracticeViewModel internal constructor(
             )
         }
         if (hits.isNotEmpty()) {
-            val source = if (row.mock) HitSource.MOCK else HitSource.USB
-            hits.forEach { rhythm.hit(source, it, row.inputSession) }
             highlightJob?.cancel()
             highlightJob = viewModelScope.launch {
                 delay(PAD_HIGHLIGHT_MILLIS)
@@ -298,22 +328,32 @@ class PracticeViewModel internal constructor(
         }
     }
 
+    private fun consumeLearn(session: Int?, receivedAt: Long): Drum? {
+        while (true) {
+            val current = state.value
+            val learning = current.learning ?: return null
+            if (learning.inputSession != session || session != connection.value.activeSession ||
+                receivedAt < learning.startedAtNanos) return null
+            if (state.compareAndSet(current, current.copy(learning = null, noteStatus = ""))) return learning.drum
+        }
+    }
+
     fun clearSession() {
-        highlightJob?.cancel()
-        state.update {
-            it.copy(logs = emptyList(), usbHits = HitSummary(), mockHits = HitSummary(), activePads = emptySet(),
-                simultaneousCount = 0)
+        events.post {
+            highlightJob?.cancel()
+            dropped.value = InputLoss()
+            state.update {
+                it.copy(logs = emptyList(), usbHits = HitSummary(), mockHits = HitSummary(), activePads = emptySet(),
+                    simultaneousCount = 0)
+            }
         }
     }
 
     override fun onCleared() {
         input.close()
-        packets.close()
+        events.close()
         audio.close()
     }
 
     private fun key(drum: Drum) = intPreferencesKey(drum.name)
-
-    private fun packet(bytes: ByteArray, messages: List<MidiMessage>, mock: Boolean, usbAudioRouted: Boolean) =
-        MidiLog(bytes.joinToString(" ") { "%02X".format(it.toInt() and 0xff) }, messages, mock, usbAudioRouted, 0)
 }
